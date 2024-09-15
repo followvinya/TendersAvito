@@ -76,7 +76,7 @@ async def get_user_tenders(
     return tenders
 
 
-# only organization responsible can view closed/created tenders
+# only organization responsible can view tender's status
 @router.get("/tenders/{tender_id}/status", response_model=TenderStatus)
 async def get_tender_status(
         tender_id: uuid.UUID,

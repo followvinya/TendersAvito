@@ -209,7 +209,7 @@ async def submit_bid_decision(
         raise HTTPException(status_code=401, detail="User does not exist")
 
     bid = session.get(Bid, bid_id)
-    if not bid:
+    if not bid or bid.status != BidStatus.PUBLISHED:
         raise HTTPException(status_code=404, detail="Bid not found")
 
     tender = session.get(Tender, bid.tender_id)
