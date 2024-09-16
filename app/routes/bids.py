@@ -10,12 +10,41 @@ import uuid
 router = APIRouter()
 
 
+def get_user_or_raise(username: str, session: Session):
+    user = session.exec(select(Employee).where(Employee.username == username)).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User does not exist")
+    return user
+
+
+def get_bid_or_raise(bid_id: uuid.UUID, session: Session):
+    bid = session.get(Bid, bid_id)
+    if not bid:
+        raise HTTPException(status_code=404, detail="Bid not found")
+    return bid
+
+
+def get_tender_or_raise(tender_id: uuid.UUID, session: Session):
+    tender = session.get(Tender, tender_id)
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+    return tender
+
+
+def check_org_responsible(user_id: uuid.UUID, organization_id: uuid.UUID, session: Session):
+    org_resp = session.exec(select(OrganizationResponsible).where(
+        OrganizationResponsible.user_id == user_id,
+        OrganizationResponsible.organization_id == organization_id
+    )).first()
+    if not org_resp:
+        raise HTTPException(status_code=403, detail="User is not responsible for this organization")
+    return org_resp
+
+
 # authorID - only user's id; one may choose authorType as organization (though not used in task specification anymore)
 @router.post("/bids/new", response_model=BidResponse)
 async def create_bid(bid: BidCreate, session: Session = Depends(get_session)):
-    tender = session.get(Tender, bid.tender_id)
-    if not tender:
-        raise HTTPException(status_code=404, detail="Tender not found")
+    tender = get_tender_or_raise(bid.tender_id, session)
 
     if tender.status != TenderStatus.PUBLISHED:
         raise HTTPException(status_code=400, detail="Bids can only be created for published tenders")
@@ -56,9 +85,7 @@ async def get_user_bids(
         offset: int = Query(0, ge=0),
         session: Session = Depends(get_session)
 ):
-    user = session.exec(select(Employee).where(Employee.username == username)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User does not exist")
+    user = get_user_or_raise(username, session)
 
     query = select(Bid).where(Bid.author_id == user.id)
     query = query.order_by(Bid.name).offset(offset).limit(limit)
@@ -75,22 +102,10 @@ async def get_bids_for_tender(
         offset: int = Query(0, ge=0),
         session: Session = Depends(get_session)
 ):
-    user = session.exec(select(Employee).where(Employee.username == username)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User does not exist")
+    user = get_user_or_raise(username, session)
+    tender = get_tender_or_raise(tender_id, session)
 
-    tender = session.get(Tender, tender_id)
-    if not tender:
-        raise HTTPException(status_code=404, detail="Tender not found")
-
-    is_tender_org_responsible = session.exec(select(OrganizationResponsible).where(
-        OrganizationResponsible.user_id == user.id,
-        OrganizationResponsible.organization_id == tender.organization_id
-    )).first()
-
-    if not is_tender_org_responsible:
-        raise HTTPException(status_code=403, detail="You don't have permission to view bids for this tender")
-
+    check_org_responsible(user.id, tender.organization_id, session)
     query = select(Bid).where(Bid.tender_id == tender_id)
     query = query.where(Bid.status == BidStatus.PUBLISHED)
 
@@ -105,13 +120,8 @@ async def get_bid_status(
         username: str,
         session: Session = Depends(get_session)
 ):
-    user = session.exec(select(Employee).where(Employee.username == username)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User does not exist")
-
-    bid = session.get(Bid, bid_id)
-    if not bid:
-        raise HTTPException(status_code=404, detail="Bid not found")
+    user = get_user_or_raise(username, session)
+    bid = get_bid_or_raise(bid_id, session)
 
     if bid.author_id != user.id:
         raise HTTPException(status_code=403, detail="You are not authorized to view the status of this bid")
@@ -126,12 +136,8 @@ async def update_bid_status(
         username: str,
         session: Session = Depends(get_session)
 ):
-    user = session.exec(select(Employee).where(Employee.username == username)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User does not exist")
-    bid = session.get(Bid, bid_id)
-    if not bid:
-        raise HTTPException(status_code=404, detail="Bid not found")
+    user = get_user_or_raise(username, session)
+    bid = get_bid_or_raise(bid_id, session)
 
     if bid.author_id != user.id:
         raise HTTPException(status_code=403, detail="User is not authorized to update the status of this bid")
@@ -163,13 +169,8 @@ async def edit_bid(
         username: str,
         session: Session = Depends(get_session)
 ):
-    user = session.exec(select(Employee).where(Employee.username == username)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User does not exist")
-
-    bid = session.get(Bid, bid_id)
-    if not bid:
-        raise HTTPException(status_code=404, detail="Bid not found")
+    user = get_user_or_raise(username, session)
+    bid = get_bid_or_raise(bid_id, session)
 
     if bid.author_id != user.id:
         raise HTTPException(status_code=403, detail="User is not authorized to edit this bid")
@@ -204,21 +205,14 @@ async def submit_bid_decision(
         username: str,
         session: Session = Depends(get_session)
 ):
-    user = session.exec(select(Employee).where(Employee.username == username)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User does not exist")
+    user = get_user_or_raise(username, session)
+    bid = get_bid_or_raise(bid_id, session)
 
-    bid = session.get(Bid, bid_id)
-    if not bid or bid.status != BidStatus.PUBLISHED:
-        raise HTTPException(status_code=404, detail="Bid not found")
+    if bid.status != BidStatus.PUBLISHED:
+        raise HTTPException(status_code=400, detail="Can only submit decision for published bids")
 
-    tender = session.get(Tender, bid.tender_id)
-    org_resp = session.exec(select(OrganizationResponsible).where(
-        OrganizationResponsible.user_id == user.id,
-        OrganizationResponsible.organization_id == tender.organization_id
-    )).first()
-    if not org_resp:
-        raise HTTPException(status_code=403, detail="User is not responsible for this organization")
+    tender = get_tender_or_raise(bid.tender_id, session)
+    check_org_responsible(user.id, tender.organization_id, session)
 
     if bid.status in {BidStatus.APPROVED, BidStatus.REJECTED} or tender.status == TenderStatus.CLOSED:
         raise HTTPException(status_code=400, detail="Cannot change status after a decision has been made")
@@ -270,13 +264,8 @@ async def rollback_bid(
         username: str,
         session: Session = Depends(get_session)
 ):
-    user = session.exec(select(Employee).where(Employee.username == username)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User does not exist")
-
-    bid = session.get(Bid, bid_id)
-    if not bid:
-        raise HTTPException(status_code=404, detail="Bid not found")
+    user = get_user_or_raise(username, session)
+    bid = get_bid_or_raise(bid_id, session)
 
     if bid.author_id != user.id:
         raise HTTPException(status_code=403, detail="User is not the author of this bid")
@@ -320,22 +309,10 @@ async def submit_bid_feedback(
         username: str,
         session: Session = Depends(get_session)
 ):
-    user = session.exec(select(Employee).where(Employee.username == username)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User does not exist")
-
-    bid = session.get(Bid, bid_id)
-    if not bid:
-        raise HTTPException(status_code=404, detail="Bid not found")
-
-    tender = session.get(Tender, bid.tender_id)
-    org_resp = session.exec(select(OrganizationResponsible).where(
-        OrganizationResponsible.user_id == user.id,
-        OrganizationResponsible.organization_id == tender.organization_id
-    )).first()
-
-    if not org_resp:
-        raise HTTPException(status_code=403, detail="User is not responsible for this organization")
+    user = get_user_or_raise(username, session)
+    bid = get_bid_or_raise(bid_id, session)
+    tender = get_tender_or_raise(bid.tender_id, session)
+    check_org_responsible(user.id, tender.organization_id, session)
 
     new_review = BidReview(
         description=feedback.description,
@@ -388,4 +365,3 @@ async def get_bid_reviews(
     query = query.order_by(BidReview.created_at.desc()).offset(offset).limit(limit)
     reviews = session.exec(query).all()
     return reviews
-
