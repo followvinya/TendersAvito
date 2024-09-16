@@ -6,15 +6,9 @@ from app.models import Bid, Employee, Tender, BidStatus, BidAuthorType, BidDecis
 from app.schemas import BidCreate, BidResponse, BidUpdate, BidReviewCreate, BidReviewResponse
 from typing import List
 import uuid
+from app.utils import get_user_or_raise, get_tender_or_raise, check_org_responsible
 
 router = APIRouter()
-
-
-def get_user_or_raise(username: str, session: Session):
-    user = session.exec(select(Employee).where(Employee.username == username)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User does not exist")
-    return user
 
 
 def get_bid_or_raise(bid_id: uuid.UUID, session: Session):
@@ -22,23 +16,6 @@ def get_bid_or_raise(bid_id: uuid.UUID, session: Session):
     if not bid:
         raise HTTPException(status_code=404, detail="Bid not found")
     return bid
-
-
-def get_tender_or_raise(tender_id: uuid.UUID, session: Session):
-    tender = session.get(Tender, tender_id)
-    if not tender:
-        raise HTTPException(status_code=404, detail="Tender not found")
-    return tender
-
-
-def check_org_responsible(user_id: uuid.UUID, organization_id: uuid.UUID, session: Session):
-    org_resp = session.exec(select(OrganizationResponsible).where(
-        OrganizationResponsible.user_id == user_id,
-        OrganizationResponsible.organization_id == organization_id
-    )).first()
-    if not org_resp:
-        raise HTTPException(status_code=403, detail="User is not responsible for this organization")
-    return org_resp
 
 
 # authorID - only user's id; one may choose authorType as organization (though not used in task specification anymore)
