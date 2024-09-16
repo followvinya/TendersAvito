@@ -10,22 +10,37 @@ import uuid
 router = APIRouter()
 
 
+def get_user_or_raise(username: str, session: Session):
+    user = session.exec(select(Employee).where(Employee.username == username)).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User does not exist")
+    return user
+
+
+def get_tender_or_raise(tender_id: uuid.UUID, session: Session):
+    tender = session.get(Tender, tender_id)
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+    return tender
+
+
+def check_org_responsible(user_id: uuid.UUID, organization_id: uuid.UUID, session: Session):
+    org_resp = session.exec(select(OrganizationResponsible).where(
+        OrganizationResponsible.user_id == user_id,
+        OrganizationResponsible.organization_id == organization_id
+    )).first()
+    if not org_resp:
+        raise HTTPException(status_code=403, detail="User is not responsible for this organization")
+    return org_resp
+
+
 @router.post("/tenders/new", response_model=TenderResponse)
 async def create_tender(
         tender: TenderCreate,
         session: Session = Depends(get_session)
 ):
-    user = session.exec(select(Employee).where(
-        Employee.username == tender.creator_username)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User does not exist")
-
-    org_resp = session.exec(select(OrganizationResponsible).where(
-        OrganizationResponsible.user_id == user.id,
-        OrganizationResponsible.organization_id == tender.organization_id
-    )).first()
-    if not org_resp:
-        raise HTTPException(status_code=403, detail="User is not responsible for this organization")
+    user = get_user_or_raise(tender.creator_username, session)
+    check_org_responsible(user.id, tender.organization_id, session)
 
     new_tender = Tender(
         name=tender.name,
@@ -64,9 +79,7 @@ async def get_user_tenders(
         offset: int = Query(0, ge=0),
         session: Session = Depends(get_session)
 ):
-    user = session.exec(select(Employee).where(Employee.username == username)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User does not exist")
+    user = get_user_or_raise(username, session)
 
     query = select(Tender).join(OrganizationResponsible,
                                 Tender.organization_id == OrganizationResponsible.organization_id)
@@ -83,21 +96,9 @@ async def get_tender_status(
         username: str,
         session: Session = Depends(get_session)
 ):
-    user = session.exec(select(Employee).where(Employee.username == username)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User does not exist")
-
-    tender = session.get(Tender, tender_id)
-    if not tender:
-        raise HTTPException(status_code=404, detail="Tender not found")
-
-    org_resp = session.exec(select(OrganizationResponsible).where(
-        OrganizationResponsible.user_id == user.id,
-        OrganizationResponsible.organization_id == tender.organization_id
-    )).first()
-
-    if not org_resp:
-        raise HTTPException(status_code=403, detail="User is not authorized to view the status of this tender")
+    user = get_user_or_raise(username, session)
+    tender = get_tender_or_raise(tender_id, session)
+    check_org_responsible(user.id, tender.organization_id, session)
     return tender.status
 
 
@@ -109,21 +110,9 @@ async def update_tender_status(
         username: str,
         session: Session = Depends(get_session)
 ):
-    user = session.exec(select(Employee).where(Employee.username == username)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User does not exist")
-
-    tender = session.get(Tender, tender_id)
-    if not tender:
-        raise HTTPException(status_code=404, detail="Tender not found")
-
-    org_resp = session.exec(select(OrganizationResponsible).where(
-        OrganizationResponsible.user_id == user.id,
-        OrganizationResponsible.organization_id == tender.organization_id
-    )).first()
-
-    if not org_resp:
-        raise HTTPException(status_code=403, detail="User is not responsible for this organization")
+    user = get_user_or_raise(username, session)
+    tender = get_tender_or_raise(tender_id, session)
+    check_org_responsible(user.id, tender.organization_id, session)
 
     tender.status = status
 
@@ -145,23 +134,11 @@ async def edit_tender(
         username: str,
         session: Session = Depends(get_session)
 ):
-    user = session.exec(select(Employee).where(Employee.username == username)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User does not exist")
+    user = get_user_or_raise(username, session)
+    tender = get_tender_or_raise(tender_id, session)
+    check_org_responsible(user.id, tender.organization_id, session)
 
-    tender = session.get(Tender, tender_id)
-    if not tender:
-        raise HTTPException(status_code=404, detail="Tender not found")
-
-    org_resp = session.exec(select(OrganizationResponsible).where(
-        OrganizationResponsible.user_id == user.id,
-        OrganizationResponsible.organization_id == tender.organization_id
-    )).first()
-
-    if not org_resp:
-        raise HTTPException(status_code=403, detail="User is not responsible for this organization")
-
-    tender_history = TenderHistory(        # for rollback
+    tender_history = TenderHistory(  # for rollback
         tender_id=tender.id,
         name=tender.name,
         description=tender.description,
@@ -187,21 +164,9 @@ async def rollback_tender(
         username: str,
         session: Session = Depends(get_session)
 ):
-    user = session.exec(select(Employee).where(Employee.username == username)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User does not exist")
-
-    tender = session.get(Tender, tender_id)
-    if not tender:
-        raise HTTPException(status_code=404, detail="Tender not found")
-
-    org_resp = session.exec(select(OrganizationResponsible).where(
-        OrganizationResponsible.user_id == user.id,
-        OrganizationResponsible.organization_id == tender.organization_id
-    )).first()
-
-    if not org_resp:
-        raise HTTPException(status_code=403, detail="User is not responsible for this organization")
+    user = get_user_or_raise(username, session)
+    tender = get_tender_or_raise(tender_id, session)
+    check_org_responsible(user.id, tender.organization_id, session)
 
     if version >= tender.version:
         raise HTTPException(status_code=400, detail="Invalid version for rollback")
