@@ -319,17 +319,8 @@ async def get_bid_reviews(
     if not author:
         raise HTTPException(status_code=404, detail="Author does not exist")
 
-    tender = session.get(Tender, tender_id)
-    if not tender:
-        raise HTTPException(status_code=404, detail="Tender not found")
-
-    org_resp = session.exec(select(OrganizationResponsible).where(
-        OrganizationResponsible.user_id == requester.id,
-        OrganizationResponsible.organization_id == tender.organization_id
-    )).first()
-
-    if not org_resp:
-        raise HTTPException(status_code=403, detail="Requester is not responsible for this organization")
+    tender = get_tender_or_raise(tender_id, session)
+    check_org_responsible(requester.id, tender.organization_id, session)
 
     author_bid = session.exec(select(Bid).where(
         Bid.tender_id == tender_id,
